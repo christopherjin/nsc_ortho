@@ -1,0 +1,255 @@
+---
+title: "nsc_ortho"
+format: html
+editor: source
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(lubridate)
+
+knitr::opts_chunk$set(echo = TRUE)
+wd = "~/Documents/GitHub/other_project_genetics/nsc_ortho/"
+```
+
+Making plots for patient characteristics
+```{r}
+combined_cleaned_data = read.csv(paste0(wd, "data/Scoliosis_combined.csv")) %>% # |> 
+  select(Age, Gender, Race, CCI) %>%
+  filter(!is.na(Age)) %>%
+  mutate(Age = as.numeric(Age))
+
+table(combined_cleaned_data$Gender, combined_cleaned_data$Race)
+
+mean(combined_cleaned_data$Age)
+sd(combined_cleaned_data$Age)
+```
+```{r}
+boxplot(combined_cleaned_data$Age, main = "Age of NSC Participants, n = 29")
+```
+```{r}
+hist(combined_cleaned_data$CCI, main = "Comorbidity of NSC Participants, n = 28")
+```
+
+```{r, warning = F}
+meaningful_variables = c("SRS_Function", "SRS_Pain", "SRS_Image", "SRS_Mental", "SRS_Total", "ODI")
+
+for(select_variable in meaningful_variables){
+  combined_cleaned_data = read.csv(paste0(wd, "data/Scoliosis_combined.csv")) %>%
+    select(`Last.Name`, starts_with(select_variable)) %>%
+    pivot_longer(cols = starts_with(select_variable), names_to = "timepoint", values_to = select_variable)
+  
+  # Plot with individual participants
+  p_individual = ggplot(combined_cleaned_data, aes(x = timepoint, y = .data[[select_variable]], group = Last.Name)) +
+    geom_line(size = 1) + 
+    geom_point(size = 2) +
+    labs(title = paste(select_variable, "from Week 0 to Week 6"),
+         x = "Timepoint",
+         y = select_variable) + 
+    theme_minimal() + 
+    theme(legend.position = "none")
+  
+  print(p_individual)
+  
+  # Plot with mean and confidence intervals
+  p_summary = ggplot(combined_cleaned_data, aes(x = timepoint, y = .data[[select_variable]])) +
+    stat_summary(fun.data = mean_cl_boot, geom = "errorbar", width = 0.2) + 
+    stat_summary(fun = mean, geom = "point", size = 3) +
+    stat_summary(fun = mean, geom = "line", size = 1) +  # Line connecting the means
+    labs(title = paste("Mean", select_variable, "from Week 0 to Week 6 with 95% CI"),
+         x = "Timepoint",
+         y = select_variable) + 
+    theme_minimal() + 
+    theme(legend.position = "none")
+  print(p_summary)
+}
+```
+
+
+
+```{r}
+finding_drop_outs = read.csv(paste0(wd, "data/Scoliosis_combined.csv")) %>%
+  mutate(dropped = ifelse(is.na(SRS_Function_Wk6) & !is.na(SRS_Function_Wk0), "dropped", "did_not_drop"))
+dropped = finding_drop_outs %>% filter(dropped == "dropped")
+hist(dropped$Enrollment.Duration)
+```
+
+```{r}
+meaningful_var_wk0 = paste0(meaningful_variables, "_Wk0")
+finding_drop_outs_long = finding_drop_outs %>%
+  select(one_of(c(meaningful_var_wk0, "dropped"))) %>%
+  pivot_longer(cols = -dropped, names_to = "Variable", values_to = "Value")
+
+# Create boxplots with dropped and non-dropped participants
+ggplot(finding_drop_outs_long, aes(x = dropped, y = Value, fill = dropped)) +
+  geom_boxplot() +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Boxplots of Meaningful Variables for Dropped and Non-Dropped Participants", x = "Dropout Status", y = "Value") +
+  scale_fill_manual(values = c("dropped" = "red", "did_not_drop" = "blue"), name = "Dropout Status")
+```
+
+Performing stats tests for each of the comparisons
+
+```{r}
+all_results_table = data.frame()
+for(select_variable in meaningful_variables){
+  combined_cleaned_data = read.csv(paste0(wd, "data/Scoliosis_combined.csv")) %>%
+    select(`Last.Name`, starts_with(select_variable)) %>%
+    pivot_longer(cols = starts_with(select_variable), names_to = "timepoint", values_to = select_variable)
+  formula_select = paste(select_variable, "~ timepoint + (1 | Last.Name)") %>% as.formula()
+  mixed_model = lmer(formula_select, data = combined_cleaned_data)
+  print(summary(mixed_model))
+  results_frame = summary(mixed_model)[["coefficients"]] %>% as.data.frame() %>% filter(!row.names(.) == "(Intercept)")
+  all_results_table = rbind(all_results_table, results_frame)
+}
+```
+
+```{r}
+all_results_table 
+```
+
+The Minimum Clinically Important Difference in SRS-22R Total Score, Appearance, Activity and Pain Domains After Surgical Treatment of Adult Spinal Deformity
+
+https://journals.lww.com/spinejournal/abstract/2015/03150/the_minimum_clinically_important_difference_in.9.aspx
+"Results: A total of 1321 patients were included in the analysis; 83% were females and 10% were smokers. Mean age was 53 years. Mean body mass index was 26.3 kg/m. Mean preoperative SRS-22R appearance score was 2.50 improving to 3.62 at 1 year postoperatively (P < 0.001). Mean preoperative SRS-22R activity score was 2.96 and it improved to 3.33 at 1 year postoperatively (P < 0.001). Mean preoperative SRS-22R pain score was 2.73 improving to 3.60 at 1 year postoperatively (P < 0.001). Mean preoperative total score was 2.93 and it improved to 3.65 at 1 year postoperatively (P < 0.001). There was a statistically significant difference in domain scores among the responses to the anchors (P < 0.001). The different calculation methods yielded MCID values of 0.19 to 1.23 for appearance, 0.23 to 0.60 for activity, 0.24 to 0.57 for pain, 0.16 to 0.43 for subscore, and 0.17 to 0.71 for total score."
+
+
+```{r}
+files = list.files(paste0(wd, "data"), full.names = TRUE)
+files = files[grep("week", files)]
+
+data_list = setNames(lapply(files, function(x) read.csv(x, check.names = FALSE)), basename(files))
+# combined_data = purrr::reduce(data_list, full_join, by = c("First Name", "Last Name"))
+```
+
+First starting with the effectiveness of the actual intervention in terms of metrics
+
+```{r}
+select_starting_variables = function(input_df){
+  org_df = input_df %>% 
+    mutate(`First Name` = str_trim(`First Name`),
+           `Last Name` = str_trim(`Last Name`)) %>%
+    mutate(name = interaction(`First Name`, `Last Name`)) %>%
+    rename_with(~ "pain_score", contains("pain level")) %>%
+    rename(times_last_wk = `How many times did you perform the Scoliosis Realignment Therapy exercises in the past 7 days?`) %>%
+    mutate(times_last_wk = as.numeric(times_last_wk)) %>%
+    select(name, pain_score, times_last_wk)
+  return(org_df)
+}
+wk_0_values = select_starting_variables(data_list[["week0.csv"]])
+wk_6_values = select_starting_variables(data_list[["week6.csv"]])
+wk_0_values$timepoint = "wk0"; wk_6_values$timepoint = "wk6"
+
+eval_pain_improve = full_join(wk_0_values, wk_6_values, by = "name", suffix = c("wk0", "wk6")) 
+head(eval_pain_improve)
+```
+
+We will need some manual review in case people are inputting their names inconsistently (e.g. with typos)
+
+```{r}
+long_data = eval_pain_improve %>%
+  pivot_longer(cols = starts_with("pain_score"), names_to = "timepoint", values_to = "pain_score") %>%
+  mutate(timepoint = recode(timepoint, "pain_score_wk0" = "Week 0", "pain_score_wk6" = "Week 6"))
+
+# Create the plot
+ggplot(long_data, aes(x = timepoint, y = pain_score, group = name)) +
+  geom_line(aes(color = times_last_wkwk0), size = 1) + # Color lines by `times_last_wk` at week 0
+  geom_point(aes(color = times_last_wkwk0), size = 2) + # Color points by `times_last_wk` at week 0
+  scale_color_gradient(low = "blue", high = "red") + # Customize the color scale
+  labs(title = "Pain Score Improvement from Week 0 to Week 6",
+       x = "Timepoint",
+       y = "Pain Score",
+       color = "Times Last Week (wk0)") +
+  theme_minimal()
+```
+
+now we actually do some stats on the dataset, starting with complete cases
+
+```{r}
+pain_complete_cases = full_join(wk_0_values, wk_6_values, by = "name", suffix = c("wk0", "wk6")) %>%
+  filter(!is.na(pain_scorewk0) & !is.na(pain_scorewk6))
+dim(pain_complete_cases)
+```
+
+```{r}
+t_test_result = t.test(pain_complete_cases$pain_scorewk0, pain_complete_cases$pain_scorewk6, paired = TRUE)
+t_test_result  
+```
+
+```{r}
+stats_pain_improve = rbind(wk_0_values, wk_6_values)
+mixed_model = lmer(pain_score ~ timepoint + (1 | name), data = stats_pain_improve)
+summary(mixed_model)
+```
+
+```{r}
+wk_8_satisfaction_scores = data_list[["week8.csv"]] 
+table(wk_8_satisfaction_scores$`How would you feel if you could no longer use National Scoliosis Clinic?`)
+```
+
+```{r}
+boxplot(wk_8_satisfaction_scores$`On a scale of 1-10, how likely are you to recommend the National Scoliosis Clinic to your friends and family members?`)
+```
+
+```{r, warning = F}
+extract_numeric = function(text) {
+  cleaned_text = str_replace_all(text, "[^\\d\\.]", "") # Remove non-numeric characters except the decimal point
+  as.numeric(cleaned_text)
+}
+
+wk_2_costs = data_list[["week2.csv"]] %>% 
+  select(Timestamp, `Join Date`, `In the past 3 months, how much did you spend on healthcare for your scoliosis or back pain?`) %>%
+  rename(cost_3_months = `In the past 3 months, how much did you spend on healthcare for your scoliosis or back pain?`) %>%
+  filter(nchar(Timestamp) > 1 & nchar(`Join Date`) > 1) %>%
+  mutate(Timestamp = mdy_hms(Timestamp, truncated = Inf),
+         `Join Date` = mdy(`Join Date`)) %>%
+  mutate(Time_Difference = as.numeric(difftime(Timestamp, `Join Date`, units = "days"))) %>%
+  mutate(cost_3_months = extract_numeric(cost_3_months)) %>%
+  filter(!is.na(cost_3_months))
+
+head(wk_2_costs)
+```
+
+```{r}
+mean(wk_2_costs$cost_3_months)
+```
+
+```{r}
+wk_2_recent = wk_2_costs %>% filter(Time_Difference < 90)
+mean(wk_2_recent$cost_3_months)
+```
+```{r}
+combined_cleaned_data_only6wk = combined_cleaned_data %>% filter(!is.null(Pain.Score_Wk6) & !is.na(Pain.Score_Wk6))
+mean(combined_cleaned_data_only6wk$Enrollment.Duration)
+sd(combined_cleaned_data_only6wk$Enrollment.Duration)
+```
+```{r}
+table(combined_cleaned_data_only6wk$Exercises_Wk0)
+```
+```{r}
+mean(na.omit(combined_cleaned_data_only6wk$Spend_3MO))
+sd(na.omit(combined_cleaned_data_only6wk$Spend_3MO))
+
+```
+```{r}
+table(combined_cleaned_data_only6wk$Imaging_3MO)
+```
+```{r}
+table(combined_cleaned_data_only6wk$OTC_3MO)
+```
+```{r}
+table(combined_cleaned_data_only6wk$Opioid_3MO)
+```
+
+```{r}
+table(combined_cleaned_data_only6wk$Gender, combined_cleaned_data_only6wk$Race)
+
+mean(combined_cleaned_data_only6wk$Age)
+sd(combined_cleaned_data_only6wk$Age)
+```

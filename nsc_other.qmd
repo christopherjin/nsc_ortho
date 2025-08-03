@@ -1,0 +1,46 @@
+---
+title: "nsc_other"
+format: html
+editor: source
+---
+
+```{r}
+library(dplyr)
+
+wd = "/Users/christopherjin/Documents/GitHub/other_project_genetics/nsc_ortho/data/"
+```
+
+```{r}
+intention_for_survey = read.csv(paste0(wd, "complete_cases.csv")) %>%
+  dplyr::filter(!is.na(Likert.before) & !is.na(Likert.after)) %>%
+  mutate(Likert.before = as.numeric(Likert.before),
+         Likert.after = as.numeric(Likert.after))
+
+t_test_result = t.test(intention_for_survey$Likert.before, intention_for_survey$Likert.after, paired = TRUE)
+t_test_result
+
+
+# Calculate differences between paired samples
+differences = intention_for_survey$Likert.before - intention_for_survey$Likert.after
+
+# Q-Q plot to check normality of differences
+qqnorm(differences)
+qqline(differences, col = "blue")
+```
+
+```{r}
+wilcox.test(intention_for_survey$Likert.before, intention_for_survey$Likert.after, paired=TRUE)
+```
+
+```{r}
+intention_for_survey_dup = intention_for_survey[duplicated(intention_for_survey$Email.Address),]
+intention_for_survey_dup
+```
+
+What percentage of ppl actually go down?
+```{r}
+intention_for_survey$greater = ifelse(intention_for_survey$Likert.before> intention_for_survey$Likert.after, "down", "not-down")
+
+message(paste(sum(intention_for_survey$greater == "down"), "participants have a decreased score out of:", nrow(intention_for_survey), "or 16.7% of participants"))
+```
+
